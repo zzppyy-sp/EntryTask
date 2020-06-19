@@ -148,7 +148,7 @@ func handleLoginRequest(user *User) *Response {
 		//The given password is incorrect
 		res.ResponseType = Response_INVALIDPASSWORD
 	} else if err.Error() == "User does not exist" {
-		//The given userId is incorrect, the user doesn't exist in the database
+		//The given userId is incorrect, the user doesn't exist in the
 		res.ResponseType = Response_INVALIDUSERNAME
 	}
 	return res

@@ -10,6 +10,9 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/gorilla/sessions"
+
+	uuid "github.com/satori/go.uuid"
 	"google.golang.org/protobuf/proto"
 	pool "pengyu.zhao/EntryTask/Http/HttpLogic/connectPool"
 )
@@ -20,6 +23,7 @@ var users = map[string]string{
 }
 
 var connectPool pool.Pool
+var store = sessions.NewCookieStore([]byte("t0p-s3cr3t"))
 
 type Credentials struct {
 	Password string `json:"password"`
@@ -46,7 +50,38 @@ func intToByteArray(a uint32) []byte {
 	return bs
 }
 
-func verifyUser(userID string, password string) (bool, error) {
+func getProfilePageDataFromSession(seesion *sessions.Session, data *profilePageData) {
+	untyped, ok := seesion.Values["userName"]
+	if !ok {
+		return
+	}
+	userName, ok := untyped.(string)
+	if !ok {
+		return
+	}
+	untyped, ok = seesion.Values["nickName"]
+	if !ok {
+		return
+	}
+	nickName, ok := untyped.(string)
+	if !ok {
+		return
+	}
+	untyped, ok = seesion.Values["pictureAddress"]
+	if !ok {
+		return
+	}
+	pictureAddress, ok := untyped.(string)
+	if !ok {
+		return
+	}
+	data.NickName = nickName
+	data.UserName = userName
+	data.PicAddress = "/documents/" + pictureAddress
+
+}
+
+func verifyUser(userID string, password string) *Response {
 	conn, err := connectPool.Get()
 
 	if err != nil {
@@ -73,9 +108,38 @@ func verifyUser(userID string, password string) (bool, error) {
 	conn.Write(data)
 
 	//read response from TCP server
-	readPackages(conn)
+	res := readPackages(conn)
 
-	return true, nil
+	return res
+
+}
+
+func retrieveUerInfo(userID string) *Response {
+	conn, err := connectPool.Get()
+	if err != nil {
+		panic(err)
+	}
+	comm := &Command{
+		CommandType: Command_RETREIVEUSERINFO,
+		User: &User{
+			ID: userID,
+		},
+	}
+
+	data, err := proto.Marshal(comm)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("sending retrieve userInfo package....")
+	fmt.Println("size of data sending is :", len(data))
+	dataLen := intToByteArray(uint32(len(data)))
+	conn.Write(dataLen)
+	conn.Write(data)
+
+	//read response from TCP server
+	res := readPackages(conn)
+
+	return res
 
 }
 
@@ -106,83 +170,70 @@ func readPackages(c net.Conn) *Response {
 func signin(w http.ResponseWriter, r *http.Request) {
 	// var creds Credentials
 	// Get the JSON body and decode into credentials
+	fmt.Println("welcome to sign in page")
+	var isLogged bool = true
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		isLogged = false
+		id := uuid.NewV4()
+		cookie = &http.Cookie{
+			Name:  "session",
+			Value: id.String(),
+		}
+		http.SetCookie(w, cookie)
+	}
+
 	if r.Method == "GET" {
-		t, _ := template.ParseFiles("../templates/login.html")
-		t.Execute(w, nil)
+		if isLogged {
+			http.Redirect(w, r, "/userProfile", http.StatusSeeOther)
+		} else {
+			t, _ := template.ParseFiles("../templates/login.html")
+			t.Execute(w, nil)
+		}
 	} else if r.Method == "POST" {
 		r.ParseForm()
 		inputUserID := r.FormValue("userID")
 		inputPassword := r.FormValue("password")
-		isValid, err := verifyUser(inputUserID, inputPassword)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		if !isValid || err != nil {
-			w.Write([]byte("error"))
+		isValid := verifyUser(inputUserID, inputPassword)
+		if isValid.GetResponseType() != Response_SUCCESSFULL {
+			io.WriteString(w, "invalid user or password")
+		} else {
+			res := retrieveUerInfo(inputUserID)
+
+			session, _ := store.Get(r, cookie.Value)
+			session.Values["userID"] = inputUserID
+			session.Values["userName"] = res.GetUser().GetUserName()
+			session.Values["nickName"] = res.GetUser().GetNickName()
+			session.Values["pictureAddress"] = res.GetUser().GetPictureAddress()
+			session.Save(r, w)
+			http.Redirect(w, r, "/userProfile", http.StatusSeeOther)
 		}
 
 	}
 
-	// err := json.NewDecoder(r.Body).Decode(&creds)
-	// if err != nil {
-	// 	// If the structure of the body is wrong, return an HTTP error
-	// 	w.WriteHeader(http.StatusBadRequest)
-	// 	return
-	// }
-
-	// // Get the expected password from our in memory map
-	// expectedPassword, ok := users[creds.Username]
-
-	// // If a password exists for the given user
-	// // AND, if it is the same as the password we received, the we can move ahead
-	// // if NOT, then we return an "Unauthorized" status
-	// if !ok || expectedPassword != creds.Password {
-	// 	w.WriteHeader(http.StatusUnauthorized)
-	// 	return
-	// }
-
-	// Create a new random session token
-	// sessionToken := uuid.New().String()
-	// Set the token in the cache, along with the user whom it represents
-	// The token has an expiry time of 120 seconds
-
-	// _, err = cache.Do("SETEX", sessionToken, "120", creds.Username)
-	// if err != nil {
-	// 	// If there is an error in setting the cache, return an internal server error
-	// 	w.WriteHeader(http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// Finally, we set the client cookie for "session_token" as the session token we just generated
-	// we also set an expiry time of 120 seconds, the same as the cache
-	// http.SetCookie(w, &http.Cookie{
-	// 	Name:    "session_token",
-	// 	Value:   sessionToken,
-	// 	Expires: time.Now().Add(120 * time.Second),
-	// })
 }
 
 func sayhelloName(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm() //Parse url parameters passed, then parse the response packet for the POST body (request body)
-	// attention: If you do not call ParseForm method, the following data can not be obtained form
-	// fmt.Println(r.Form) // print information on server side.
-	// fmt.Println("path", r.URL.Path)
-	// fmt.Println("scheme", r.URL.Scheme)
-	// fmt.Println(r.Form["url_long"])
-	// for k, v := range r.Form {
-	// 	fmt.Println("key:", k)
-	// 	fmt.Println("val:", strings.Join(v, ""))
-	// }
-	fmt.Fprintf(w, "Hello astaxie!") // write data to response
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func showUserProfile(w http.ResponseWriter, r *http.Request) {
-
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		fmt.Println("cookie is empty")
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	sID := cookie.Value
+	session, err := store.Get(r, sID)
+	if err != nil {
+		panic(err)
+	}
+	data := &profilePageData{}
+	getProfilePageDataFromSession(session, data)
+	fmt.Println(r.Method)
 	if r.Method == "GET" {
 		t, _ := template.ParseFiles("../templates/userPage.html")
-		data := profilePageData{
-			UserName:   "hello",
-			NickName:   "world",
-			PicAddress: "/documents/image.jpg",
-		}
 		t.Execute(w, data)
 	} else if r.Method == "POST" {
 		fmt.Println("File Upload Endpoint Hit")
