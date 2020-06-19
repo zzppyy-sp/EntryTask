@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>UserProfile</title>
+</head>
+<body>
+<h1>Test</h1>
+<h1>{{.UserName}}</h1>
+<h2>{{.NickName}}</h2>
+<h2>{{.PicAddress}}</h2>
+
+<form method="POST">
+    <label for="nickname">nickname:</label><br>
+    <input type="text" id="nickname" name="nickname" value="{{.NickName}}"><br>
+    <input type="submit" value="Update">
+  </form> 
+
+<form method="POST" enctype="multipart/form-data">
+<img src="{{.PicAddress}}">
+<label for="file">Filename:</label>
+<input type="file" name="file" id="file" value="{{.PicAddress}}"><br>
+<input type="submit" value="Update">
+</form>
+
+
+</body>
+</html>

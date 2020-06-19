@@ -1,0 +1,32 @@
+syntax="proto3";
+
+package main;
+
+message User {
+    string ID = 1;
+    string userName = 2;
+    string nickName = 3;
+    string password = 4;
+    string pictureAddress = 5;
+}
+
+message Command{
+    enum CommandType {
+        VERIFYUSER = 0;
+        UPDATENICKNAME = 1;
+        UPDATEPASSWORD = 2;
+        RETREIVEUSERINFO = 3;
+      }
+    CommandType commandType = 1;
+    User user = 2;    
+}
+
+message Response{
+    enum ResponseType{
+        SUCCESSFULL=0;
+        INVALIDPASSWORD=1;
+        INVALIDUSERNAME=2;
+    }
+    ResponseType responseType = 1;
+    User user =2;
+}
